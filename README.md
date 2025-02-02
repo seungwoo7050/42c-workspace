@@ -1,31 +1,51 @@
 # format-printer
 
-`printf`의 핵심 서식을 직접 다루는 C 정적 라이브러리를 만드는 프로젝트다.
-최종 산출물은 `libftprintf.a`, 공개 진입점은 다음 형태를 목표로 한다.
+![Language](https://img.shields.io/badge/language-C99-blue?logo=c&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-POSIX-lightgrey)
 
-```c
-int ft_printf(const char *format, ...);
+42 `ft_printf` 과제를 변형한 C 프로젝트입니다. 포맷 문자열을 해석해 fd 1에 쓰는 `ft_printf`를 정적 라이브러리로 제공합니다.
+
+## 빌드
+
+```sh
+make        # 라이브러리 빌드
+make clean  # build/ 삭제
+make re     # 처음부터 다시 빌드
 ```
 
-## 예정 범위
+산출물은 `build/libftprintf.a`, 공개 헤더는 `include/ft_printf.h`입니다.
 
-- 문자, 문자열, 포인터, 10진수, 16진수와 퍼센트 변환을 지원한다.
-- 플래그, 필드 너비와 정밀도를 단계적으로 추가한다.
-- 출력 바이트 수와 실패를 호출자에게 일관된 반환값으로 전달한다.
-- 부동소수점, 로캘, 위치 인자와 길이 지정자는 범위에 넣지 않는다.
+## 사용
 
-## 개발 규약
+```c
+#include "ft_printf.h"
 
-- 구현 언어는 C이며 `-Wall -Wextra -Werror` 경고 정책을 지킨다.
-- 공개 선언은 `include/`, 내부 구현은 `src/`, 검증 코드는 `tests/`에 둔다.
-- Make 규칙으로 정적 아카이브를 재현 가능하게 생성한다.
-- 기능은 빌드 가능한 작은 책임 단위로 추가한다.
-- 시스템 출력과 가변 인자의 경계를 명시적으로 다룬다.
+int	main(void)
+{
+	int	written;
 
-## 검증 원칙
+	written = ft_printf("[%-6s|%05d|%#x|%p]\n", "abc", -42, 255u, (void *)0);
+	return (written < 0);
+}
+```
 
-- 각 단계에서 clean build를 확인한다.
-- 공개 출력 바이트와 반환값을 함께 검증한다.
-- 오류 경로는 가능한 경우 결정적인 테스트 대역으로 재현한다.
-- 생성된 object, archive와 test binary는 버전 관리하지 않는다.
-- 문서는 구현이 확정된 뒤 실제 계약과 검증 범위에 맞춰 갱신한다.
+```sh
+cc -std=c99 -Wall -Wextra -Werror -Iinclude example.c build/libftprintf.a -o example
+```
+
+변환은 `%c %s %p %d %i %u %x %X %%`, 플래그는 `-`, `0`, `#`, 공백, `+`, 그리고 십진 너비와 `.` 정밀도를 지원합니다. 성공하면 쓴 바이트 수를, 지원하지 않는 형식이나 쓰기 오류면 -1을 돌려줍니다.
+
+## 테스트
+
+```sh
+make test
+```
+
+일반 출력 테스트와 `write` 오류 주입 테스트(짧은 쓰기, `EINTR`, `EPIPE`, 0바이트 반환)를 함께 실행합니다.
+
+## 범위와 제한
+
+- 길이 지정자(`l`, `h` 등), `*` 너비·정밀도, 위치 인자, 부동소수점 변환은 지원하지 않습니다. 이런 형식이 있으면 아무것도 쓰지 않고 -1을 돌려줍니다.
+- 출력 fd는 1로 고정입니다.
+- 쓰는 도중 오류가 나면 이미 쓴 바이트는 되돌리지 않습니다. `EINTR`만 재시도하고, 비차단 fd의 `EAGAIN`은 오류로 처리합니다.
+- `SIGPIPE` 처리 방식은 바꾸지 않습니다.
