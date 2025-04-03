@@ -1,36 +1,39 @@
 # thread-dining
 
-`thread-dining`은 식사하는 철학자 문제를 C와 POSIX thread로 구현하는
-프로젝트다. 각 철학자는 독립된 worker로 동작하고 공유 포크의 소유권은
-동기화 객체로 표현한다.
+![Language](https://img.shields.io/badge/language-C-blue?logo=c&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-POSIX-lightgrey)
 
-## 목표
+42 `philo` 과제를 변형한 C 프로젝트입니다. 철학자마다 pthread 하나, 포크마다 mutex 하나를 두고 식사하는 철학자 문제를 시뮬레이션합니다.
 
-- 정해진 CLI 입력을 검증해 실행 설정으로 변환한다.
-- 철학자의 식사·수면·사고 흐름을 서로 독립된 worker로 실행한다.
-- 사망 또는 선택적인 식사 횟수 완료 조건에서 전체 실행을 종료한다.
-- 생성한 thread와 동기화 자원의 수명을 명시적으로 관리한다.
+## 빌드
 
-## 예정 실행 계약
-
-```text
-./philo number_of_philosophers time_to_die time_to_eat time_to_sleep [number_of_times_each_philosopher_must_eat]
+```sh
+make        # philo 빌드
+make clean  # build/ 삭제
+make re     # 처음부터 다시 빌드
 ```
 
-시간 단위는 밀리초다. 실행 파일 이름은 `philo`로 고정하고 bonus target은
-제공하지 않는다.
+산출물은 `build/bin/philo`입니다.
 
-## 개발 규약
+## 실행
 
-- 언어는 C를 사용하고 POSIX thread API에 의존한다.
-- 기본 compiler 경고는 `-Wall -Wextra -Werror`를 적용한다.
-- thread 지원을 위해 compile과 link에 `-pthread`를 사용한다.
-- public 선언은 `include/`, 구현은 `src/`, 검증 코드는 `tests/`에 둔다.
-- 생성된 executable과 object는 Git에 포함하지 않는다.
-- 변경은 하나의 책임 단위로 나누고 각 단계가 독립적으로 build되게 한다.
+```sh
+./build/bin/philo 5 800 200 200      # 철학자 수, time_to_die, time_to_eat, time_to_sleep
+./build/bin/philo 5 800 200 200 3    # 다섯째 인자: 철학자마다 채울 식사 횟수
+```
 
-## 검증 원칙
+시간 단위는 밀리초입니다. 상태가 바뀔 때마다 `<경과 ms> <번호> <상태>`를 한 줄씩 출력하고, 누군가 죽거나 모두 식사 횟수를 채우면 끝납니다. 인자 개수나 값이 맞지 않으면 사용법을 출력하고 종료 코드 1로 끝납니다.
 
-초기에는 compiler 경고 없는 clean build와 대표 CLI 입력을 확인한다. 동시성
-상태가 추가되면 정상 종료, 실패 rollback, 로그 형식과 경쟁 조건을 별도의
-검증 경로로 확장한다.
+## 테스트
+
+```sh
+make test
+```
+
+`make test-tsan`은 ThreadSanitizer로 다시 검사합니다. TSan을 쓸 수 없는 환경에서는 `tsan: skipped`를 출력하고 종료 코드 77로 끝나며, `TSAN_REQUIRED=1`을 주면 1로 끝납니다.
+
+## 범위와 제한
+
+- 철학자 수는 1~200, 시간과 식사 횟수는 1 이상 `INT_MAX` 이하의 정수만 받습니다.
+- bonus 구현은 없습니다. `make bonus`는 메시지를 출력하고 실패합니다.
+- 사망은 감시 스레드가 0.5ms 간격으로 폴링해 판정하므로 `time_to_die`보다 조금 늦게 출력될 수 있습니다.
