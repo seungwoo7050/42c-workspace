@@ -1,40 +1,38 @@
 # small-shell
 
-`small-shell`은 명령줄을 읽고 해석해 실행하는 과정을 C로 구현하며
-셸의 데이터 구조와 프로세스 수명을 학습하기 위한 프로젝트다.
+![Language](https://img.shields.io/badge/language-C99-blue?logo=c&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-POSIX-lightgrey)
 
-## 목표
+42 `minishell` 과제를 변형한 C 프로젝트입니다. 명령줄을 토큰화·파싱·확장한 뒤 리다이렉션, heredoc, 파이프라인, builtin과 외부 명령을 실행하는 작은 셸입니다.
 
-- C99와 POSIX 인터페이스를 사용한다.
-- tokenizer, parser, expansion 단계를 명확히 분리한다.
-- builtin과 외부 명령의 실행 경계를 구분한다.
-- pipeline, redirection, heredoc의 자원 소유권을 추적한다.
-- 오류를 호출자에게 전달하고 부분 결과를 정리한다.
+## 빌드
 
-완성된 프로그램은 표준 입력에서 한 줄씩 읽어 제한된 셸 문법을 실행하는
-`small-shell` 실행 파일로 제공할 예정이다.
+```sh
+make        # small-shell 빌드
+make clean  # build/ 삭제
+make re     # 처음부터 다시 빌드
+```
 
-## 개발 규약
+산출물은 `build/bin/small-shell`입니다. readline으로 줄을 읽게 하려면 `make clean && make readline`으로 빌드합니다(`-lreadline` 필요, 기존 오브젝트가 있으면 `make readline`만으로는 다시 컴파일되지 않습니다).
 
-- `-std=c99 -Wall -Wextra -Wpedantic` 경고 없이 빌드한다.
-- 한 변경은 하나의 명확한 책임만 다룬다.
-- 새 추상화는 실제 사용 경로와 함께 검증한다.
-- 파일 디스크립터, 동적 메모리와 자식 프로세스의 소유자를 명시한다.
-- 실패 경로도 정상 경로와 같은 수준으로 정리한다.
-- 동작을 추가한 뒤 독립적으로 재현 가능한 검증을 남긴다.
+## 실행
 
-## 예정 범위
+```sh
+./build/bin/small-shell
+```
 
-- 인용 문자열과 셸 연산자의 tokenization
-- pipeline과 조건 연결자를 포함한 parsing
-- 환경 변수와 종료 상태 expansion
-- 기본 builtin과 외부 명령 실행
-- 파일 redirection과 heredoc
+인자는 받지 않고 표준 입력에서 한 줄씩 읽습니다. `|`, `<`, `>`, `>>`, `<<`, `&&`, `||`, `;`, 작은따옴표·큰따옴표, `$NAME`과 `$?` 확장, builtin `echo`, `pwd`, `cd`, `env`, `export`, `unset`, `exit`를 지원합니다.
 
-background 실행, job control, subshell, glob과 완전한 POSIX shell 호환은
-이 프로젝트의 범위에 포함하지 않는다.
+## 테스트
 
-## 검증 원칙
+```sh
+make test
+```
 
-각 단계는 그 시점에 존재하는 코드만으로 빌드할 수 있어야 한다. 기능이 연결된
-뒤에는 정상 동작뿐 아니라 입력·할당·시스템 호출 실패와 자원 수명도 검증한다.
+`make test-asan`과 `make test-ubsan`은 같은 테스트를 각 sanitizer로 실행합니다. `make test-sanitizers-container`는 Docker의 `gcc:13-bookworm` 이미지에서 두 타깃을 실행합니다.
+
+## 범위와 제한
+
+- 백그라운드 실행 `&`는 문법 오류로 거부합니다. 괄호 subshell, glob, job control은 구현하지 않았습니다.
+- 시그널 핸들러를 두지 않으므로 Ctrl-C를 누르면 셸 자체가 기본 동작대로 종료됩니다.
+- `-Werror` 없이 빌드하므로 경고가 있어도 빌드는 실패하지 않습니다.
