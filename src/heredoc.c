@@ -321,37 +321,45 @@ static int read_heredoc(struct exec_context *ctx, t_redir *redir)
     return 0;
 }
 
-int exec_prepare_heredocs(struct exec_context *ctx, t_pipeline *pipelines)
+static void prepare_heredoc_list(struct exec_context *ctx,
+        t_pipeline *pipelines, int interactive, int *failed)
 {
     t_pipeline  *pipeline;
-    int         failed;
-    int         interactive;
+    t_command   *command;
+    t_redir     *redir;
 
-    failed = 0;
-    interactive = isatty(STDIN_FILENO) && isatty(STDERR_FILENO);
     pipeline = pipelines;
     while (pipeline != NULL) {
-        t_command *command;
-
         command = pipeline->commands;
         while (command != NULL) {
-            t_redir *redir;
-
             redir = command->redirs;
             while (redir != NULL) {
                 if (redir->type == REDIR_HEREDOC) {
-                    if (!failed && read_heredoc(ctx, redir) != 0)
-                        failed = 1;
-                    else if (failed
+                    if (!*failed && read_heredoc(ctx, redir) != 0)
+                        *failed = 1;
+                    else if (*failed
                         && discard_heredoc(redir->target, interactive) != 0)
-                        failed = 1;
+                        *failed = 1;
                 }
                 redir = redir->next;
             }
+            if (command->subshell != NULL)
+                prepare_heredoc_list(ctx, command->subshell, interactive,
+                    failed);
             command = command->next;
         }
         pipeline = pipeline->next;
     }
+}
+
+int exec_prepare_heredocs(struct exec_context *ctx, t_pipeline *pipelines)
+{
+    int failed;
+    int interactive;
+
+    failed = 0;
+    interactive = isatty(STDIN_FILENO) && isatty(STDERR_FILENO);
+    prepare_heredoc_list(ctx, pipelines, interactive, &failed);
     if (failed)
         fprintf(stderr, "small-shell: heredoc: preparation failure\n");
     return failed;

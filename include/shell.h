@@ -13,7 +13,9 @@ typedef enum e_token_type {
     TOK_HEREDOC,
     TOK_AND,
     TOK_OR,
-    TOK_SEQ
+    TOK_SEQ,
+    TOK_LPAREN,
+    TOK_RPAREN
 }   t_token_type;
 
 typedef struct s_token {
@@ -47,6 +49,7 @@ typedef struct s_command {
     char                **argv;
     size_t              argc;
     t_redir             *redirs;
+    struct s_pipeline   *subshell;
     struct s_command    *next;
 }   t_command;
 

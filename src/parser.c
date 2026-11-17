@@ -92,7 +92,8 @@ static int add_redir(t_command *cmd, t_redir_type type, const char *target,
 
 static int command_empty(t_command *cmd)
 {
-    return (cmd == NULL || (cmd->argc == 0 && cmd->redirs == NULL));
+    return (cmd == NULL || (cmd->argc == 0 && cmd->redirs == NULL
+            && cmd->subshell == NULL));
 }
 
 static void append_command(t_pipeline *pipeline, t_command *cmd)
@@ -147,110 +148,193 @@ static t_connector connector_type(t_token_type type)
     return CONN_SEQ;
 }
 
-static t_pipeline *parse_failure(t_pipeline *head, t_pipeline *pipeline,
-        t_command *cmd, char **error, const char *message)
+#define MAX_GROUP_DEPTH 64
+
+typedef struct s_parse {
+    t_token *cur;
+    char    **error;
+    int     depth;
+}   t_parse;
+
+static t_pipeline *parse_list(t_parse *p, int in_group);
+
+static void *parse_error(t_parse *p, const char *message)
 {
-    set_error(error, message);
-    free_commands(cmd);
-    free_pipeline(pipeline);
-    free_pipeline(head);
+    set_error(p->error, message);
     return NULL;
+}
+
+static int token_is(const t_parse *p, t_token_type type)
+{
+    return (p->cur != NULL && p->cur->type == type);
+}
+
+static int parse_group(t_parse *p, t_command *cmd)
+{
+    if (cmd->argc != 0 || cmd->redirs != NULL || cmd->subshell != NULL) {
+        parse_error(p, "syntax error: unexpected '('");
+        return 1;
+    }
+    if (p->depth >= MAX_GROUP_DEPTH) {
+        parse_error(p, "syntax error: group nesting too deep");
+        return 1;
+    }
+    p->cur = p->cur->next;
+    p->depth++;
+    cmd->subshell = parse_list(p, 1);
+    p->depth--;
+    if (cmd->subshell == NULL)
+        return 1;
+    if (!token_is(p, TOK_RPAREN)) {
+        parse_error(p, "syntax error: missing ')'");
+        return 1;
+    }
+    p->cur = p->cur->next;
+    return 0;
+}
+
+static int parse_redirection(t_parse *p, t_command *cmd)
+{
+    if (p->cur->next == NULL || p->cur->next->type != TOK_WORD) {
+        parse_error(p, "syntax error: redirection target missing");
+        return 1;
+    }
+    if (add_redir(cmd, redir_type(p->cur->type), p->cur->next->text,
+            p->cur->next->quoted) != 0) {
+        parse_error(p, "allocation failure");
+        return 1;
+    }
+    p->cur = p->cur->next->next;
+    return 0;
+}
+
+/* command := '(' list ')' redirs* | word-or-redir+ ; '(' 에서 parse_list로 재귀한다. */
+static t_command *parse_command(t_parse *p)
+{
+    t_command   *cmd;
+    int         failed;
+
+    cmd = new_command();
+    if (cmd == NULL)
+        return parse_error(p, "allocation failure");
+    failed = 0;
+    while (p->cur != NULL && !failed) {
+        if (p->cur->type == TOK_WORD) {
+            if (cmd->subshell != NULL) {
+                parse_error(p, "syntax error: unexpected word after group");
+                failed = 1;
+            } else if (add_arg(cmd, p->cur->text) != 0) {
+                parse_error(p, "allocation failure");
+                failed = 1;
+            } else
+                p->cur = p->cur->next;
+        } else if (token_is_redir(p->cur->type))
+            failed = parse_redirection(p, cmd);
+        else if (p->cur->type == TOK_LPAREN)
+            failed = parse_group(p, cmd);
+        else
+            break;
+    }
+    if (failed) {
+        free_commands(cmd);
+        return NULL;
+    }
+    return cmd;
+}
+
+static const char *empty_command_message(const t_parse *p, int after_pipe)
+{
+    if (token_is(p, TOK_PIPE))
+        return "syntax error: empty command before pipe";
+    if (after_pipe)
+        return "syntax error: expected command after pipe";
+    if (token_is(p, TOK_RPAREN) && p->depth == 0)
+        return "syntax error: unexpected ')'";
+    return "syntax error: empty command before connector";
+}
+
+/* pipeline := command ( '|' command )* */
+static t_pipeline *parse_pipeline(t_parse *p)
+{
+    t_pipeline  *pipeline;
+    t_command   *cmd;
+    int         after_pipe;
+
+    pipeline = new_pipeline();
+    if (pipeline == NULL)
+        return parse_error(p, "allocation failure");
+    after_pipe = 0;
+    for (;;) {
+        cmd = parse_command(p);
+        if (cmd == NULL) {
+            free_pipeline(pipeline);
+            return NULL;
+        }
+        if (command_empty(cmd)) {
+            free_commands(cmd);
+            free_pipeline(pipeline);
+            return parse_error(p, empty_command_message(p, after_pipe));
+        }
+        append_command(pipeline, cmd);
+        if (!token_is(p, TOK_PIPE))
+            return pipeline;
+        p->cur = p->cur->next;
+        after_pipe = 1;
+    }
+}
+
+/* list := pipeline ( ('&&' | '||' | ';') pipeline )* ';'? */
+static t_pipeline *parse_list(t_parse *p, int in_group)
+{
+    t_pipeline      *head;
+    t_pipeline      *tail;
+    t_pipeline      *pipeline;
+    t_token_type    connector;
+
+    head = NULL;
+    tail = NULL;
+    if (p->cur == NULL)
+        return in_group ? parse_error(p, "syntax error: missing ')'") : NULL;
+    if (in_group && token_is(p, TOK_RPAREN))
+        return parse_error(p, "syntax error: empty group");
+    for (;;) {
+        pipeline = parse_pipeline(p);
+        if (pipeline == NULL) {
+            free_pipeline(head);
+            return NULL;
+        }
+        append_pipeline(&head, &tail, pipeline);
+        if (p->cur == NULL || (in_group && token_is(p, TOK_RPAREN)))
+            return head;
+        if (token_is(p, TOK_RPAREN)) {
+            free_pipeline(head);
+            return parse_error(p, "syntax error: unexpected ')'");
+        }
+        connector = p->cur->type;
+        pipeline->next_op = connector_type(connector);
+        p->cur = p->cur->next;
+        if (p->cur == NULL || (in_group && token_is(p, TOK_RPAREN))) {
+            if (connector == TOK_SEQ) {
+                pipeline->next_op = CONN_NONE;
+                return head;
+            }
+            free_pipeline(head);
+            return parse_error(p, "syntax error: conditional operator needs "
+                "a following pipeline");
+        }
+    }
 }
 
 t_pipeline *parse_tokens(t_token *tokens, char **error)
 {
-    t_pipeline  *head;
-    t_pipeline  *tail;
-    t_pipeline  *pipeline;
-    t_command   *cmd;
-    t_token     *cur;
-    t_token_type last_connector;
-    int         after_pipe;
+    t_parse p;
 
-    head = NULL;
-    tail = NULL;
-    pipeline = new_pipeline();
-    cmd = new_command();
-    cur = tokens;
-    last_connector = TOK_WORD;
-    after_pipe = 0;
+    p.cur = tokens;
+    p.error = error;
+    p.depth = 0;
     if (error != NULL)
         *error = NULL;
-    if (pipeline == NULL || cmd == NULL)
-        return parse_failure(head, pipeline, cmd, error,
-            "allocation failure");
-    while (cur != NULL) {
-        if (cur->type == TOK_WORD) {
-            if (add_arg(cmd, cur->text) != 0)
-                return parse_failure(head, pipeline, cmd, error,
-                    "allocation failure");
-            after_pipe = 0;
-        } else if (token_is_redir(cur->type)) {
-            if (cur->next == NULL || cur->next->type != TOK_WORD)
-                return parse_failure(head, pipeline, cmd, error,
-                    "syntax error: redirection target missing");
-            if (add_redir(cmd, redir_type(cur->type), cur->next->text,
-                    cur->next->quoted) != 0)
-                return parse_failure(head, pipeline, cmd, error,
-                    "allocation failure");
-            cur = cur->next;
-            after_pipe = 0;
-        } else if (cur->type == TOK_PIPE) {
-            if (command_empty(cmd))
-                return parse_failure(head, pipeline, cmd, error,
-                    "syntax error: empty command before pipe");
-            append_command(pipeline, cmd);
-            cmd = new_command();
-            if (cmd == NULL)
-                return parse_failure(head, pipeline, cmd, error,
-                    "allocation failure");
-            after_pipe = 1;
-        } else {
-            if (after_pipe)
-                return parse_failure(head, pipeline, cmd, error,
-                    "syntax error: expected command after pipe");
-            if (command_empty(cmd) && pipeline->commands == NULL)
-                return parse_failure(head, pipeline, cmd, error,
-                    "syntax error: empty command before connector");
-            if (!command_empty(cmd))
-                append_command(pipeline, cmd);
-            else
-                free_commands(cmd);
-            cmd = NULL;
-            pipeline->next_op = connector_type(cur->type);
-            append_pipeline(&head, &tail, pipeline);
-            last_connector = cur->type;
-            pipeline = new_pipeline();
-            cmd = new_command();
-            if (pipeline == NULL || cmd == NULL)
-                return parse_failure(head, pipeline, cmd, error,
-                    "allocation failure");
-            after_pipe = 0;
-        }
-        cur = cur->next;
-    }
-    if (after_pipe)
-        return parse_failure(head, pipeline, cmd, error,
-            "syntax error: expected command after pipe");
-    if (!command_empty(cmd))
-        append_command(pipeline, cmd);
-    else
-        free_commands(cmd);
-    cmd = NULL;
-    if (pipeline->commands == NULL) {
-        free(pipeline);
-        if (last_connector == TOK_AND || last_connector == TOK_OR) {
-            set_error(error,
-                "syntax error: conditional operator needs a following pipeline");
-            free_pipeline(head);
-            return NULL;
-        }
-        if (last_connector == TOK_SEQ && tail != NULL)
-            tail->next_op = CONN_NONE;
-        return head;
-    }
-    append_pipeline(&head, &tail, pipeline);
-    return head;
+    return parse_list(&p, 0);
 }
 
 static void free_redirs(t_redir *redir)
@@ -273,6 +357,7 @@ static void free_commands(t_command *cmd)
         next = cmd->next;
         sh_free_words(cmd->argv);
         free_redirs(cmd->redirs);
+        free_pipeline(cmd->subshell);
         free(cmd);
         cmd = next;
     }

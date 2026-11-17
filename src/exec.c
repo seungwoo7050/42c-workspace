@@ -14,6 +14,9 @@
 
 extern char **environ;
 
+static int execute_pipeline_list_ctx(t_shell *shell, t_pipeline *pipeline,
+    const struct exec_context *ctx);
+
 static void close_pipes(int (*pipes)[2], size_t pipe_count)
 {
     size_t i;
@@ -54,6 +57,15 @@ static void run_child(t_shell *shell, const t_pipeline *pipeline, const t_comman
 
     if (exec_apply_redirections(command, ctx) != 0)
         _exit(1);
+    if (command->subshell != NULL) {
+        int status;
+
+        /* ( list ): 이 자식 프로세스가 곧 서브셸이라 환경 변경이 부모에 새지 않는다. */
+        status = execute_pipeline_list_ctx(shell, command->subshell, ctx);
+        fflush(stdout);
+        fflush(stderr);
+        _exit(status & 0xff);
+    }
     if (command->argc == 0)
         _exit(0);
     if (builtin_is_known(command->argv[0])) {
@@ -239,13 +251,14 @@ static int execute_one_pipeline(t_shell *shell, t_pipeline *pipeline, const stru
     }
     shell_runtime_set_alloc_scope("execute");
     command = pipeline->commands;
-    if (pipeline->command_count == 1
+    if (pipeline->command_count == 1 && command->subshell == NULL
         && (command->argc == 0 || builtin_is_parent(command->argv[0])))
         return exec_run_parent_command(shell, command, ctx);
     return run_forked_pipeline(shell, pipeline, ctx);
 }
 
-static int execute_pipeline_list_ctx(t_shell *shell, t_pipeline *pipeline, const struct exec_context *ctx)
+static int execute_pipeline_list_ctx(t_shell *shell, t_pipeline *pipeline,
+    const struct exec_context *ctx)
 {
     t_connector previous;
 

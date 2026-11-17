@@ -246,4 +246,63 @@ echo \$?
 " \
 0
 
+run_case group_pipe_and_connectors \
+"(echo a && echo b) | cat
+(false || echo x) && echo y
+((echo n1; echo n2))
+" \
+"a
+b
+x
+y
+n1
+n2
+" \
+0
+
+run_case group_isolates_environment \
+"export GROUP_VAR=outer
+(export GROUP_VAR=inner; cd $TMP)
+env | grep '^GROUP_VAR='
+pwd | grep -c '$TMP_PHYSICAL'
+echo end
+" \
+"GROUP_VAR=outer
+0
+end
+" \
+0
+
+run_case group_exit_status_and_redirection \
+"(exit 3)
+echo \$?
+(echo hi) > $TMP/group_redir.txt
+cat $TMP/group_redir.txt
+(cat) <<EOF
+body
+EOF
+" \
+"3
+hi
+body
+" \
+0
+
+run_case group_syntax_errors \
+"(echo a
+echo \$?
+()
+echo \$?
+echo a)
+echo \$?
+(echo a) echo b
+echo \$?
+" \
+"258
+258
+258
+258
+" \
+0
+
 echo "ok - smoke"

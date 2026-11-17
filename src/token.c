@@ -53,7 +53,8 @@ static int push_operator(t_token **head, t_token **tail, t_token_type type,
 
 static int is_operator_char(char c)
 {
-    return (c == '|' || c == '<' || c == '>' || c == '&' || c == ';');
+    return (c == '|' || c == '<' || c == '>' || c == '&' || c == ';'
+        || c == '(' || c == ')');
 }
 
 static int is_shell_space(char c)
@@ -159,6 +160,12 @@ t_token *tokenize_line(const char *line, char **error)
             set_error(error, "syntax error: unsupported operator '&'");
             free_tokens(head);
             return NULL;
+        } else if (line[i] == '(') {
+            failed = push_operator(&head, &tail, TOK_LPAREN, "(", i);
+            i++;
+        } else if (line[i] == ')') {
+            failed = push_operator(&head, &tail, TOK_RPAREN, ")", i);
+            i++;
         } else if (line[i] == ';') {
             failed = push_operator(&head, &tail, TOK_SEQ, ";", i);
             i++;

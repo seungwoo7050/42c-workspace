@@ -90,6 +90,20 @@ after
 after
 '
 
+sweep parser_group parser 40 \
+    '(echo marker; (echo inner)) | cat
+echo $?
+echo after
+' \
+    '1
+after
+' \
+    'marker
+inner
+0
+after
+'
+
 sweep expand expand 40 \
     'echo marker
 echo $?
